@@ -1,0 +1,16 @@
+Aider/bin
+Aider/__pycache__
+Aider/document_chunks
+Aider/etc
+Aider/lib
+Aider/lib64
+Aider/local
+Aider/recruitment_documents
+Aider/share
+Aider/temp
+Aider/.env
+./*.pdf
+Docs
+Docs/*
+Aider/include
+Aider/pyvenv.cfg
