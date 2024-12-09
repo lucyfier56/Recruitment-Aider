@@ -5,7 +5,7 @@ import docx
 import PyPDF2
 
 load_dotenv()
-
+# parsing the document
 class DocumentParser:
     def __init__(self):
         self.parser = LlamaParse(
