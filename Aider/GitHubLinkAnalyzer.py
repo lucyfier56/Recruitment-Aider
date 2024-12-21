@@ -5,6 +5,7 @@ import logging
 from typing import List, Dict, Optional
 from groq import Groq
 import os
+from contextlib import suppress
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,199 +14,147 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 class GitHubLinkAnalyzer:
+    """
+    extract_links_from_pdf: Extracts all links from a PDF file
+    filter_github_links: Filters GitHub repository links from a list of links
+    fetch_readme: Fetches the README content from a GitHub repository
+    analyze_readme: Analyzes the README content of a GitHub repository
+    """
+    
     def __init__(self):
-        """
-        Initialize the GitHub Link Analyzer with Groq client
-        """
+        
         self.client = Groq(api_key=os.getenv('GROQ_API_KEY'))
     
     def extract_links_from_pdf(self, pdf_path: str) -> List[str]:
-        """
-        Extract all links from a PDF file using PyMuPDF
         
-        :param pdf_path: Path to the PDF file
-        :return: List of unique extracted links
-        """
-        try:
-            # Open the PDF
-            doc = fitz.open(pdf_path)
-            
-            # Set to store unique links
-            all_links = set()
-            
-            # Iterate through all pages
-            for page_num in range(len(doc)):
-                page = doc.load_page(page_num)
-                
-                # Get links from the page
-                page_links = page.get_links()
-                
-                # Extract and store URI links
-                for link in page_links:
-                    if link.get('uri'):
-                        all_links.add(link['uri'])
-            
-            # Close the document
-            doc.close()
-            
-            return list(all_links)
+        with suppress(Exception):
+            with fitz.open(pdf_path) as doc:
+                return list(dict.fromkeys([
+                    link['uri']
+                    for page_num in range(len(doc))
+                    for link in doc.load_page(page_num).get_links()
+                    if link.get('uri')
+                ]))
         
-        except Exception as e:
-            logger.error(f"Error extracting links from PDF: {e}")
-            return []
+        return []
     
-    def filter_github_links(self, links: List[str]) -> List[str]:
-        """
-        Filter out GitHub repository links
+    def filter_github_links(self, links: List[str]) -> bool:
         
-        :param links: List of all links
-        :return: List of GitHub repository links
-        """
-        # Regex pattern to match GitHub repository URLs
         github_pattern = r'^https?://(?:www\.)?github\.com/[a-zA-Z0-9-]+/[a-zA-Z0-9-]+(?:/)?$'
         
-        github_links = [
-            link for link in links 
-            if re.match(github_pattern, link) and 
-               not link.endswith('/blob/') and 
-               not link.endswith('/tree/')
-        ]
+        with suppress(Exception):
+            github_links = [
+                link for link in links 
+                if re.match(github_pattern, link) and 
+                not link.endswith('/blob/') and 
+                not link.endswith('/tree/')
+            ]
+            return github_links if github_links else False
         
-        return list(set(github_links))
+        return False
     
     def fetch_readme(self, github_link: str) -> Optional[str]:
-        """
-        Fetch README file from a GitHub repository
         
-        :param github_link: GitHub repository URL
-        :return: README content or None
-        """
-        try:
-            # Possible README locations
-            readme_urls = [
-                github_link.replace('https://github.com/', 'https://raw.githubusercontent.com/') + '/main/README.md',
-                github_link.replace('https://github.com/', 'https://raw.githubusercontent.com/') + '/master/README.md',
-                github_link.rstrip('/') + '/raw/main/README.md',
-                github_link.rstrip('/') + '/raw/master/README.md'
-            ]
-            
-            for readme_url in readme_urls:
-                try:
-                    logger.info(f"Attempting to fetch README from: {readme_url}")
-                    response = requests.get(readme_url, timeout=10)
-                    
-                    if response.status_code == 200:
-                        logger.info("README successfully fetched")
-                        return response.text
+        readme_urls = [
+            github_link.replace('https://github.com/', 'https://raw.githubusercontent.com/') + '/main/README.md',
+            github_link.replace('https://github.com/', 'https://raw.githubusercontent.com/') + '/master/README.md',
+            github_link.rstrip('/') + '/raw/main/README.md',
+            github_link.rstrip('/') + '/raw/master/README.md'
+        ]
+        
+        for readme_url in readme_urls:
+            with suppress(requests.RequestException):
+                logger.info(f"Attempting to fetch README from: {readme_url}")
+                response = requests.get(readme_url, timeout=10)
                 
-                except requests.RequestException as e:
-                    logger.warning(f"Error fetching README from {readme_url}: {e}")
-            
-            logger.warning(f"No README found for {github_link}")
-            return None
+                if response.status_code == 200:
+                    logger.info("README successfully fetched")
+                    return response.text
         
-        except Exception as e:
-            logger.error(f"Unexpected error in fetch_readme: {e}")
-            return None
+        logger.warning(f"No README found for {github_link}")
+        return None
+
     
+    
+
     def analyze_readme(self, readme_content: str, github_link: str, jd_text: str) -> str:
-        """
-        Analyze README using Groq's Llama 3.1 70B model
         
-        :param readme_content: README content to analyze
-        :param github_link: Repository URL for context
-        :param jd_text: Job description text
-        :return: Analysis results
-        """
         if not readme_content:
             return "No README content available for analysis."
         
         try:
-            chat_completion = self.client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert software project analyzer. Provide a comprehensive, structured analysis of the project README."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""Analyze the GitHub repository README:
+            with suppress(Exception):
+                chat_completion = self.client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are an expert software project analyzer. Provide a comprehensive, structured analysis of the project README."
+                        },
+                        {
+                            "role": "user",
+                            "content": f"""Analyze the GitHub repository README:
 
-                            Repository URL: {github_link}
+                                Repository URL: {github_link}
 
-                            Job Description Context:
-                            {jd_text}
+                                Job Description Context:
+                                {jd_text}
 
-                            README Content:
-                            {readme_content}
+                                README Content:
+                                {readme_content}
 
-                            Please provide a detailed analysis with:
-                            1. Project Overview
-                            2. Key Technologies and Frameworks
-                            3. Technical Complexity
-                            4. Relevance to Job Description
-                            5. Skills Demonstrated
-                            6. Potential Interview Discussion Points
+                                Please provide a detailed analysis with:
+                                1. Project Overview
+                                2. Key Technologies and Frameworks
+                                3. Technical Complexity
+                                4. Relevance to Job Description
+                                5. Skills Demonstrated
+                                6. Potential Interview Discussion Points
 
-                            Format your response in clear, structured markdown."""
-                    }
-                ],
-                model="llama-3.1-70b-versatile",
-                max_tokens=1024,
-                temperature=0.5
-            )
-            
-            analysis = chat_completion.choices[0].message.content
-            return analysis
+                                Format your response in clear, structured markdown."""
+                        }
+                    ],
+                    model="llama-3.1-70b-versatile",
+                    max_tokens=1024,
+                    temperature=0
+                )
+                
+                analysis = chat_completion.choices[0].message.content
+                return analysis
         
         except Exception as e:
             logger.error(f"Error in README analysis for {github_link}: {e}")
             return f"Error in README analysis: {e}"
+
     
+    from contextlib import suppress
+
     def process_github_projects(self, resume_pdf: str, jd_text: str) -> Dict[str, Dict]:
-        """
-        Process GitHub projects from a PDF resume
         
-        :param resume_pdf: Path to the PDF resume
-        :param jd_text: Job description text
-        :return: Dictionary of analyzed GitHub projects
-        """
-        # Extract all links from PDF
         all_links = self.extract_links_from_pdf(resume_pdf)
         
-        # Filter GitHub repository links
+        
         github_links = self.filter_github_links(all_links)
         
-        # Store analysis results
         project_analyses = {}
         
-        # Process each GitHub link
         for link in github_links:
-            try:
+            with suppress(Exception):  
                 logger.info(f"Processing GitHub repository: {link}")
                 
-                # Fetch README content
+                project_analyses[link] = {}
+                
                 readme_content = self.fetch_readme(link)
                 
-                # If README exists, analyze it
                 if readme_content:
                     readme_analysis = self.analyze_readme(readme_content, link, jd_text)
-                    
-                    project_analyses[link] = {
-                        'readme_content': readme_content,
-                        'analysis': readme_analysis
-                    }
+                    project_analyses[link]['readme_content'] = readme_content
+                    project_analyses[link]['analysis'] = readme_analysis
                 else:
-                    project_analyses[link] = {
-                        'readme_content': None,
-                        'analysis': "No README found for this repository."
-                    }
-            
-            except Exception as e:
-                logger.error(f"Error processing {link}: {e}")
-                project_analyses[link] = {
-                    'readme_content': None,
-                    'analysis': f"Error processing repository: {e}"
-                }
+                    project_analyses[link]['readme_content'] = None
+                    project_analyses[link]['analysis'] = "No README found for this repository."
+                
+                
+                if not readme_content or 'analysis' not in project_analyses[link]:
+                    logger.error(f"Error processing {link}: No README or analysis results")
         
         return project_analyses

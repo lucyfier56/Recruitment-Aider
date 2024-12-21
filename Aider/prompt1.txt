@@ -1,0 +1,37 @@
+ {
+                Please provide a detailed analysis with:
+                1. candidate_summary: Brief professional snapshot including years of experience and standout achievements
+                2. skills_assesment: Detailed analysis of technical and transferable skills with specific examples from CV.
+                3. job-fit_analysis: Analysis of overall fit including technical skills, soft skills, cultural alignment, and potential for future growth. 
+                4. experience_analysis: Detailed review of relevant experience, Career Progression and indication of countinous learning. 
+                5. key_strengths: Highlight any unique strengths or exceptional achievements that set the candidate apart. 
+                6. potential_risks:
+                        - Identify any potential risks, redflags or concerns, discrepancies in the CV, including employment gaps, too many job switches in a short time and such similar risks a Seasoned HR Manager would consider in hiring this candidate.
+                        - If there are none, return none.
+                7. skill_gaps: 
+                        - Compare the skills required in the Job Description and in the candidate's resume.
+                        - If there are none, return none.
+                8. recommended_interview_questions: 
+                        - Tailored technical, situational and behavioral interview questions that explore the candidate's unique experiences, address any CV gaps, and assess their problem-solving abilities and cultural fit
+                        - For culure fit use the below values:
+                            . Cultivating Happiness
+                            . Crafting Excellence
+                            . Delighting Customers
+                9. recommendations: Provide actionable steps or suggestions on how to proceed with the candidate, including training needs and alternative roles.    
+                10. cv_structure: assess the quality of the resume based on the following criterie and give an Score (60-100)
+                        - Based on the length: How short and specific it is - (33%) 
+                        - Details: are there necessary detailes like, phone number, name, linkedin id, email present - (33%)
+                        - Errors: Are there grammatical errors or typos? Does it reflect attention to detail? (33%)
+                11. score: An overall score should be generated based on the following criteria. (60-100) 
+                        - Direct skill matches: 40%
+                        - Relevant experience: 25%
+                        - Project complexity and impact: 15%
+                        - Potential for future growth and learning ability: 10%
+                        - Cultural fit and soft skills: 10%        
+                9. Analyze the Job Description and suggest what other role designation can be used for the same.
+               
+                10. Give everything in multiple points and in a structured manner.
+                
+
+                Format the response in clear, structured markdown.
+                }

@@ -3,13 +3,42 @@ import base64
 from PIL import Image
 import io
 import os
-from DocumentParser import DocumentParser
-from VecotoreStoreManager import VectorStoreManager
-from LLMAnalyzer import LLMAnalyzer
-from GitHubLinkAnalyzer import GitHubLinkAnalyzer
 import tempfile
 from dotenv import load_dotenv
-import time
+
+# MongoDB Imports
+from pymongo.mongo_client import MongoClient
+from pymongo.server_api import ServerApi
+
+# Import other project modules
+from DocumentParser import DocumentParser
+from VectoreStoreManager import VectorStoreManager
+from LLMAnalyzer import LLMAnalyzer
+from GitHubLinkAnalyzer import GitHubLinkAnalyzer
+
+
+def connect_to_mongodb():
+    """
+    Connect to MongoDB using environment variables
+    
+    :return: MongoDB database connection or None
+    """
+    try:
+        db_password = os.getenv('DB_PASSWORD')
+        uri = f"mongodb+srv://rudrapandarp:{db_password}@cluster0.uomwx.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+        
+        load_dotenv()
+        
+        client = MongoClient(uri)
+        db = client['recruitment_database']
+        
+        client.admin.command('ping')
+        print("Successfully connected to MongoDB!")
+        
+        return db
+    except Exception as e:
+        st.error(f"Error connecting to MongoDB: {e}")
+        return None
 
 def get_base64_of_bin_file(bin_file):
     """Convert image to base64"""
@@ -45,18 +74,21 @@ def set_background(png_file):
 
 
 
+
+
+
 def main():
-    # Load environment variables
+    
     load_dotenv()
 
-    # Page Configuration
+    
     st.set_page_config(
         page_title="Recruitment Aider", 
         page_icon="💡", 
         layout="wide"
     )
     
-    # Custom CSS for enhanced styling
+    
     st.markdown("""
     <style>
     /* Global Styles */
@@ -89,20 +121,22 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    # Create a dedicated directory for document storage
-    document_storage_dir = os.path.join(os.getcwd(), 'recruitment_documents')
-    os.makedirs(document_storage_dir, exist_ok=True)
     
-    # Initialize services
+    db = connect_to_mongodb()
+    
+    
     document_parser = DocumentParser()
-    vector_store = VectorStoreManager(storage_dir=document_storage_dir)
-    llm_analyzer = LLMAnalyzer()
+    vector_store = VectorStoreManager()
+    
+    
+    llm_analyzer = LLMAnalyzer(db=db)
+    
     github_analyzer = GitHubLinkAnalyzer()
 
-    # Main Title and Subheader
+    
     st.markdown('<h1 class="main-title">Recruitment Aider 💼</h1>', unsafe_allow_html=True)
     
-    # Features Overview
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -126,10 +160,10 @@ def main():
         candidate strengths and potential gaps.
         """)
     
-    # Main Content Area
+    
     st.markdown('<div class="stCard">', unsafe_allow_html=True)
     
-    # File Upload Columns
+    
     col_jd, col_resumes = st.columns(2)
     
     with col_jd:
@@ -151,7 +185,7 @@ def main():
             help="Upload multiple candidate resumes"
         )
     
-    # Process Button
+    
     process_button = st.button(
         "🚀 Analyze Resume & Job Match", 
         use_container_width=True,
@@ -159,17 +193,21 @@ def main():
     )
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Analysis Section
+    
+    if not db:
+        st.error("Failed to connect to MongoDB. Please check your connection settings.")
+        return
+    
+    
     if process_button and jd_file and resume_files:
-        # Progress Indicators
+        
         with st.spinner('Processing documents...'):
             try:
-                # Parse Job Description
+               
                 jd_text = document_parser.parse_job_description(jd_file)
                 
-                # Add Job Description to Vector Store with more robust ID
-                jd_doc_id = f"jd_{int(time.time())}_{jd_file.name}"
-                vector_store.add_document(jd_doc_id, jd_text, 
+                
+                vector_store.add_document('job_description', jd_text, 
                                           {'type': 'job_description', 'filename': jd_file.name})
                 
                 # Results Container
@@ -181,37 +219,33 @@ def main():
                 
                 for tab, resume_file in zip(analysis_tabs, resume_files):
                     with tab:
-                        # Create a temporary file to pass to GitHub link analyzer
                         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(resume_file.name)[1]) as tmp_file:
                             tmp_file.write(resume_file.getvalue())
                             tmp_file_path = tmp_file.name
                         
                         try:
-                            # Parse Resume
-                            resume_text = document_parser.parse_resume(resume_file)
                             
-                            # Add Resume to Vector Store with more robust ID
-                            resume_doc_id = f"resume_{int(time.time())}_{resume_file.name}"
-                            vector_store.add_document(resume_doc_id, resume_text, 
+                            resume_text = document_parser.parse_resume(resume_file)
+                            vector_store.add_document(resume_file.name, resume_text, 
                                                       {'type': 'resume', 'filename': resume_file.name})
                             
-                            # Analyze Resume against Job Description
-                            analysis_result = llm_analyzer.analyze_resume_and_jd(resume_text, jd_text)
+                            analysis_result = llm_analyzer.analyze_resume_and_jd(resume_text, jd_text, resume_pdf=tmp_file_path)[0]
                             
-                            # Display Resume Analysis
+                            job_data =  llm_analyzer.analyze_resume_and_jd(resume_text, jd_text, resume_pdf=tmp_file_path)[1]
+                            llm_analyzer.save_or_update_candidate_analysis(db, job_data)
+                            embeddings = document_parser.get_embeddings(jd_text)
+                            print(embeddings)
+                            
                             st.markdown(f"### Analysis for {resume_file.name}")
                             st.markdown(analysis_result)
                             
-                            # GitHub Project Analysis
                             st.markdown("### 🔗 GitHub Project Analysis")
                             
-                            # Analyze GitHub projects
                             github_results = github_analyzer.process_github_projects(
                                 resume_pdf=tmp_file_path, 
                                 jd_text=jd_text
                             )
-                            
-                            # Display GitHub Project Analyses
+                           
                             if github_results:
                                 for repo, result in github_results.items():
                                     st.markdown(f"#### 🌐 Repository: {repo}")
@@ -220,19 +254,14 @@ def main():
                                 st.info("No GitHub repositories found in the resume.")
                         
                         finally:
-                            # Clean up temporary file
                             os.unlink(tmp_file_path)
                 
                 st.markdown('</div>', unsafe_allow_html=True)
                 
-                # Optional: Display saved document locations
-                st.info(f"Documents saved in: {document_storage_dir}")
                 st.success('Analysis completed successfully!')
             
             except Exception as e:
                 st.error(f"An error occurred: {e}")
-                import traceback
-                traceback.print_exc()
 
 if __name__ == "__main__":
     main()
