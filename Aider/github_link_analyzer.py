@@ -113,7 +113,7 @@ class GitHubLinkAnalyzer:
                                 Format your response in clear, structured markdown."""
                         }
                     ],
-                    model="llama-3.1-70b-versatile",
+                    model="llama-3.3-70b-versatile",
                     max_tokens=1024,
                     temperature=0
                 )

@@ -11,34 +11,35 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
 # Import other project modules
-from DocumentParser import DocumentParser
-from VectoreStoreManager import VectorStoreManager
-from LLMAnalyzer import LLMAnalyzer
-from GitHubLinkAnalyzer import GitHubLinkAnalyzer
+from document_parser import DocumentParser
+from llm_analyzer import LLMAnalyzer
+from github_link_analyzer import GitHubLinkAnalyzer
+from data_storage import RecruitmentDataHandler
 
 
-def connect_to_mongodb():
-    """
-    Connect to MongoDB using environment variables
+
+# def connect_to_mongodb():
+#     """
+#     Connect to MongoDB using environment variables
     
-    :return: MongoDB database connection or None
-    """
-    try:
-        db_password = os.getenv('DB_PASSWORD')
-        uri = f"mongodb+srv://rudrapandarp:{db_password}@cluster0.uomwx.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+#     :return: MongoDB database connection or None
+#     """
+#     try:
+#         db_password = os.getenv('DB_PASSWORD')
+#         uri = f"mongodb+srv://rudrapandarp:{db_password}@cluster0.uomwx.mongodb.net/"
         
-        load_dotenv()
+#         load_dotenv()
         
-        client = MongoClient(uri)
-        db = client['recruitment_database']
+#         client = MongoClient(uri)
+#         db = client['recruitment_database']
         
-        client.admin.command('ping')
-        print("Successfully connected to MongoDB!")
+#         client.admin.command('ping')
+#         print("Successfully connected to MongoDB!")
         
-        return db
-    except Exception as e:
-        st.error(f"Error connecting to MongoDB: {e}")
-        return None
+#         return db
+#     except Exception as e:
+#         st.error(f"Error connecting to MongoDB: {e}")
+#         return None
 
 def get_base64_of_bin_file(bin_file):
     """Convert image to base64"""
@@ -122,16 +123,16 @@ def main():
     """, unsafe_allow_html=True)
     
     
-    db = connect_to_mongodb()
+    # db = connect_to_mongodb()
     
     
     document_parser = DocumentParser()
-    vector_store = VectorStoreManager()
     
+    llm_analyzer = LLMAnalyzer()
     
-    llm_analyzer = LLMAnalyzer(db=db)
-    
-    github_analyzer = GitHubLinkAnalyzer()
+    db_password = os.getenv('DB_PASSWORD')
+    connection_string = f"mongodb+srv://rudrapandarp:{db_password}@cluster0.uomwx.mongodb.net/"
+    data_storage = RecruitmentDataHandler(connection_string)
 
     
     st.markdown('<h1 class="main-title">Recruitment Aider 💼</h1>', unsafe_allow_html=True)
@@ -194,9 +195,9 @@ def main():
     st.markdown('</div>', unsafe_allow_html=True)
     
     
-    if not db:
-        st.error("Failed to connect to MongoDB. Please check your connection settings.")
-        return
+    # if not db:
+    #     st.error("Failed to connect to MongoDB. Please check your connection settings.")
+    #     return
     
     
     if process_button and jd_file and resume_files:
@@ -207,8 +208,7 @@ def main():
                 jd_text = document_parser.parse_job_description(jd_file)
                 
                 
-                vector_store.add_document('job_description', jd_text, 
-                                          {'type': 'job_description', 'filename': jd_file.name})
+               
                 
                 # Results Container
                 st.markdown('<div class="stCard">', unsafe_allow_html=True)
@@ -226,25 +226,25 @@ def main():
                         try:
                             
                             resume_text = document_parser.parse_resume(resume_file)
-                            vector_store.add_document(resume_file.name, resume_text, 
-                                                      {'type': 'resume', 'filename': resume_file.name})
+
+                            analysis = llm_analyzer.analyze_resume_and_jd(resume_text, jd_text, resume_pdf=tmp_file_path)
                             
-                            analysis_result = llm_analyzer.analyze_resume_and_jd(resume_text, jd_text, resume_pdf=tmp_file_path)[0]
+                            analysis_result = analysis[0]
                             
                             job_data =  llm_analyzer.analyze_resume_and_jd(resume_text, jd_text, resume_pdf=tmp_file_path)[1]
-                            llm_analyzer.save_or_update_candidate_analysis(db, job_data)
-                            embeddings = document_parser.get_embeddings(jd_text)
+
+                            embeddings = llm_analyzer.analyze_resume_and_jd(resume_text, jd_text, resume_pdf=tmp_file_path)[3]
                             print(embeddings)
+                            
+                            results = data_storage.process_job_data(job_data)
+                            print(results)
                             
                             st.markdown(f"### Analysis for {resume_file.name}")
                             st.markdown(analysis_result)
                             
                             st.markdown("### 🔗 GitHub Project Analysis")
                             
-                            github_results = github_analyzer.process_github_projects(
-                                resume_pdf=tmp_file_path, 
-                                jd_text=jd_text
-                            )
+                            github_results = llm_analyzer.analyze_resume_and_jd(resume_text, jd_text, resume_pdf=tmp_file_path)[2]
                            
                             if github_results:
                                 for repo, result in github_results.items():
