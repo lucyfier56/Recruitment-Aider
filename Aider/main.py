@@ -1,267 +1,359 @@
-import streamlit as st
-import base64
-from PIL import Image
-import io
-import os
+import datetime
+from io import BytesIO
 import tempfile
-from dotenv import load_dotenv
-
-# MongoDB Imports
-from pymongo.mongo_client import MongoClient
-from pymongo.server_api import ServerApi
-
-# Import other project modules
+from fastapi import FastAPI, UploadFile, File, HTTPException,Form
+from typing import List, Dict, Any, Optional
+from fastapi.responses import JSONResponse
+import uvicorn
+from pydantic import BaseModel, Field
+import os
+import logging
+from bson import ObjectId
 from document_parser import DocumentParser
 from llm_analyzer import LLMAnalyzer
-from github_link_analyzer import GitHubLinkAnalyzer
 from data_storage import RecruitmentDataHandler
+from dotenv import load_dotenv
+load_dotenv()
+
+from logging import getLogger
+
+from fastapi import HTTPException
+from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional
+
+class StoreAnalysisInput(BaseModel):
+    job_role: str = Field(..., description="Job role to analyze against")
+    resume_content: str = Field(..., description="Resume content to analyze")
+
+class StoreAnalysisResponse(BaseModel):
+    status: str
+    message: str
+    data: Optional[Dict[str, Any]]
+    candidate_analysis: Optional[Dict[str, Any]]
+    candidate_name: Optional[str]
+    total_candidates: Optional[int]
+    job_id: Optional[str]
+
+    class Config:
+        arbitrary_types_allowed = True
+        json_encoders = {
+            ObjectId: str,
+            datetime.datetime: lambda v: v.isoformat()
+        }
+
+app = FastAPI()
 
 
 
-# def connect_to_mongodb():
-#     """
-#     Connect to MongoDB using environment variables
+class DirectJDInput(BaseModel):
+    job_role: str
+    jd_content: str = Field(..., description="Job description content - can include multiple lines")
+    location: str
+    title: str
     
-#     :return: MongoDB database connection or None
-#     """
-#     try:
-#         db_password = os.getenv('DB_PASSWORD')
-#         uri = f"mongodb+srv://rudrapandarp:{db_password}@cluster0.uomwx.mongodb.net/"
+    class Config:
+        json_encoders = {
+            str: lambda v: v.replace('\n', '\\n')
+        }
+
+class UploadJDInput(BaseModel):
+    job_role: str
+    location: str
+    title: str
+
+class ParseResponse(BaseModel):
+    content_text: str
+    message: str
+
+class JDResponse(BaseModel):
+    status: str
+    message: str
+    data: Optional[Dict[str, Any]]
+    total_jds: Optional[int]
+    job_id: Optional[str]
+    similar_jd: Optional[Dict[str, Any]]
+
+class ResumeUploadInput(BaseModel):
+    job_role: str
+    resume_content: str = Field(..., description="Resume content - can include multiple lines")
+
+# Set up proper logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="Recruitment Analyzer API",
+    description="API for analyzing resumes against job descriptions",
+    version="1.0.0"
+)
+
+class AnalysisResponse(BaseModel):
+    candidate_name: str
+    job_title: str
+    analysis_text: str
+    github_analysis: Dict[str, Any]
+    job_description: str
+    resume_text: str
+    embeddings: List[float]
+
+
+class JobRole(BaseModel):
+    _id: str
+    job_role: str
+    department: str
+    worktype: str
+    salary: str
+    require_experience:str
+    class Config:
+        # Allow population by field name for MongoDB _id
+        allow_population_by_field_name = True
+        json_encoders = {
+            ObjectId: str
+        }
+class JobResponse(BaseModel):
+    job_role: str
+    jd_content: str
+    location: str
+    title: str
+    
+class ResumeResponse(BaseModel):
+    status: str
+    message: str
+    data: Optional[Dict[str, Any]]
+    job_id: Optional[str]
+    similar_resume: Optional[Dict[str, Any]]
+    metadata: Optional[Dict[str, Any]]
+
+    class Config:
+        arbitrary_types_allowed = True
+        json_encoders = {
+            ObjectId: str,
+            datetime.datetime: lambda v: v.isoformat()
+        }
+
+document_parser = DocumentParser()
+
+
+
+@app.post("/jobs/", response_model=JobResponse)
+async def create_role(job : JobRole):
+    try:
+        connection_string = os.getenv("MONGODB_URI") 
+        data_handle = RecruitmentDataHandler(connection_string)
+        result = data_handle.add_jobrole(
+            job_role = job.job_role,
+            department = job.department,
+            worktype = job.worktype,
+            salary = job.salary,
+            required_experience = job.require_experience
+        )
         
-#         load_dotenv()
+        if not result:
+            raise HTTPException(
+                status_code=500,
+                detail = "Failed to create job role"
+            )
         
-#         client = MongoClient(uri)
-#         db = client['recruitment_database']
+        response_data = {
+            "_id" : str(result["_id"]),
+            "job_role" : result["job_role"],
+            "department" : result["department"],
+            "worktype" : result["worktype"],
+            "salary" : result["salary"],
+            "required_experience" : result["required_experience"]
+        }
         
-#         client.admin.command('ping')
-#         print("Successfully connected to MongoDB!")
-        
-#         return db
-#     except Exception as e:
-#         st.error(f"Error connecting to MongoDB: {e}")
-#         return None
-
-def get_base64_of_bin_file(bin_file):
-    """Convert image to base64"""
-    with open(bin_file, 'rb') as f:
-        data = f.read()
-    return base64.b64encode(data).decode()
-
-def set_background(png_file):
-    """Set background image for the app"""
-    bin_str = get_base64_of_bin_file(png_file)
-    page_bg_img = f'''
-    <style>
-    .stApp {{
-        background-image: url("data:image/png;base64,{bin_str}");
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
-    }}
-    .stApp::before {{
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(255, 255, 255, 0.7);
-        backdrop-filter: blur(10px);
-        z-index: -1;
-    }}
-    </style>
-    '''
-    st.markdown(page_bg_img, unsafe_allow_html=True)
-
-
-
-
-
-
-def main():
-    
-    load_dotenv()
-
-    
-    st.set_page_config(
-        page_title="Recruitment Aider", 
-        page_icon="💡", 
-        layout="wide"
-    )
-    
-    
-    st.markdown("""
-    <style>
-    /* Global Styles */
-    body {
-        color: #333;
-        font-family: 'Inter', sans-serif;
-    }
-    
-    /* Header Styles */
-    .main-title {
-        font-size: 3rem;
-        font-weight: 800;
-        color: #ffffff;
-        text-align: center;
-        margin-bottom: 1rem;
-    }
-    
-    /* Card-like Containers */
-    .stCard {
-        border-radius: 15px;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-        padding: 20px;
-        margin-bottom: 20px;
-        transition: all 0.3s ease;
-    }
-    .stCard:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 15px 30px rgba(0,0,0,0.15);
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    
-    # db = connect_to_mongodb()
-    
-    
-    document_parser = DocumentParser()
-    
-    llm_analyzer = LLMAnalyzer()
-    
-    db_password = os.getenv('DB_PASSWORD')
-    connection_string = f"mongodb+srv://rudrapandarp:{db_password}@cluster0.uomwx.mongodb.net/"
-    data_storage = RecruitmentDataHandler(connection_string)
-
-    
-    st.markdown('<h1 class="main-title">Recruitment Aider 💼</h1>', unsafe_allow_html=True)
-    
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        ### 🎯 Intelligent Skill Mapping
-        AI-powered precise alignment of candidate capabilities 
-        with job requirements.
-        """)
-    
-    with col2:
-        st.markdown("""
-        ### ⚡ Rapid Screening
-        Instantly analyze multiple resumes, 
-        saving hours of manual review.
-        """)
-    
-    with col3:
-        st.markdown("""
-        ### 🔍 Deep Insights
-        Comprehensive analysis highlighting 
-        candidate strengths and potential gaps.
-        """)
-    
-    
-    st.markdown('<div class="stCard">', unsafe_allow_html=True)
-    
-    
-    col_jd, col_resumes = st.columns(2)
-    
-    with col_jd:
-        st.markdown("#### 📄 Job Description")
-        jd_file = st.file_uploader(
-            "Upload Job Description", 
-            type=['pdf', 'docx', 'txt'], 
-            key="jd_uploader",
-            help="Upload the job description document"
+        return JSONResponse(
+            status_code=200,
+            content = response_data
         )
     
-    with col_resumes:
-        st.markdown("#### 📋 Candidate Resumes")
-        resume_files = st.file_uploader(
-            "Upload Resumes", 
-            accept_multiple_files=True, 
-            type=['pdf', 'docx', 'txt'], 
-            key="resume_uploader",
-            help="Upload multiple candidate resumes"
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail = f"Failed to create job role: {str(e)}"
         )
-    
-    
-    process_button = st.button(
-        "🚀 Analyze Resume & Job Match", 
-        use_container_width=True,
-        type="primary"
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    
-    # if not db:
-    #     st.error("Failed to connect to MongoDB. Please check your connection settings.")
-    #     return
-    
-    
-    if process_button and jd_file and resume_files:
+
+
+
+
+@app.post("/jobs/upload-jd/file", response_model=JDResponse)
+async def upload_jd_file(
+    job_role: str = Form(...),
+    location: str = Form(...),
+    file: UploadFile = File(...)
+):
+    try:
         
-        with st.spinner('Processing documents...'):
-            try:
-               
-                jd_text = document_parser.parse_job_description(jd_file)
-                
-                
-               
-                
-                # Results Container
-                st.markdown('<div class="stCard">', unsafe_allow_html=True)
-                st.markdown("## 📊 Analysis Results")
-                
-                # Create a tabbed interface for results
-                analysis_tabs = st.tabs([f"Resume {i+1}" for i in range(len(resume_files))])
-                
-                for tab, resume_file in zip(analysis_tabs, resume_files):
-                    with tab:
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(resume_file.name)[1]) as tmp_file:
-                            tmp_file.write(resume_file.getvalue())
-                            tmp_file_path = tmp_file.name
-                        
-                        try:
-                            
-                            resume_text = document_parser.parse_resume(resume_file)
+        content = await parse_uploaded_file(file)
+        
+        # Initialize LLMAnalyzer and get job title
+        llm_analyzer = LLMAnalyzer()
+        title = llm_analyzer.job_title(content)
+        data_handle = RecruitmentDataHandler(os.getenv("MONGODB_URI"))
+        
+        result = data_handle.upload_jd(
+            job_role=job_role,
+            job_description=content,
+            location=location,
+            title=title
+        )
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+    except Exception as e:
+        logger.error(f"Error processing file upload: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process job description: {str(e)}"
+        )
 
-                            analysis = llm_analyzer.analyze_resume_and_jd(resume_text, jd_text, resume_pdf=tmp_file_path)
-                            
-                            analysis_result = analysis[0]
-                            
-                            job_data =  llm_analyzer.analyze_resume_and_jd(resume_text, jd_text, resume_pdf=tmp_file_path)[1]
+@app.post("/jobs/upload-jd/direct", response_model=JDResponse)
+async def upload_jd_direct(job_input: DirectJDInput):
+    try:
+        data_handle = RecruitmentDataHandler(os.getenv("MONGODB_URI"))
+        
+        
+        result = data_handle.upload_jd(
+            job_role=job_input.job_role,
+            job_description=job_input.jd_content,
+            location=job_input.location,
+            title=job_input.title
+        )
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+    except Exception as e:
+        logger.error(f"Error processing direct input: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process job description: {str(e)}"
+        )
 
-                            embeddings = llm_analyzer.analyze_resume_and_jd(resume_text, jd_text, resume_pdf=tmp_file_path)[3]
-                            print(embeddings)
-                            
-                            results = data_storage.process_job_data(job_data)
-                            print(results)
-                            
-                            st.markdown(f"### Analysis for {resume_file.name}")
-                            st.markdown(analysis_result)
-                            
-                            st.markdown("### 🔗 GitHub Project Analysis")
-                            
-                            github_results = llm_analyzer.analyze_resume_and_jd(resume_text, jd_text, resume_pdf=tmp_file_path)[2]
-                           
-                            if github_results:
-                                for repo, result in github_results.items():
-                                    st.markdown(f"#### 🌐 Repository: {repo}")
-                                    st.markdown(result['analysis'])
-                            else:
-                                st.info("No GitHub repositories found in the resume.")
-                        
-                        finally:
-                            os.unlink(tmp_file_path)
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                st.success('Analysis completed successfully!')
+async def parse_uploaded_file(file: UploadFile) -> str:
+    try:
+        # Validate file types
+        allowed_extensions = ['.pdf', '.docx', '.txt']
+        
+        if not file or not file.filename:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid or missing file"
+            )
+           
+        extension = os.path.splitext(file.filename)[1].lower()
+        
+        if extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}"
+            )
+       
+        content = await file.read()
+
+        content_text = document_parser.extract_text_from_file(
+            file=content, 
+            filename=file.filename
+        )
+        
+        
+        if isinstance(content_text, tuple):
+            content_text = content_text[0]
+        if isinstance(content_text, bytes):
+            content_text = content_text.decode('utf-8')
             
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
+        logger.info("Document parsed successfully")
+        return content_text
 
+    except ValueError as e:
+        logger.error(f"Parsing error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/jobs/upload-resume/file", response_model=ResumeResponse)
+async def upload_resume(
+    job_role: str = Form(...),
+    job_title: str = Form(...),
+    file: UploadFile = File(...)
+):
+    try:
+        # Read the PDF content
+        pdf_content = await file.read()
+        file_obj = BytesIO(pdf_content)
+        
+        # Extract text content
+        content_text, error_msg = document_parser.extract_text_from_file(
+            file=file_obj,
+            filename=file.filename
+        )
+        
+        if error_msg:
+            raise HTTPException(status_code=400, detail=error_msg)
+            
+        if not content_text:
+            raise HTTPException(status_code=400, detail="No content could be extracted from the file")
+        
+        data_handle = RecruitmentDataHandler(os.getenv("MONGODB_URI"))
+        upload_result = data_handle.upload_resume(
+            job_role=job_role,
+            job_title=job_title,
+            resume_content=content_text,
+            pdf_content=pdf_content
+        )
+        
+        if upload_result["status"] in ["created", "updated"]:
+            analysis_result = data_handle.store_analysis(
+                job_role=job_role,
+                candidate_name=upload_result["candidate_name"],
+                job_title=job_title
+            )
+            upload_result["analysis"] = analysis_result.get("candidate_analysis")
+        
+        return JSONResponse(status_code=200, content=upload_result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing file upload: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process resume: {str(e)}")
+
+
+@app.post("/analysis/store", response_model=StoreAnalysisResponse)
+async def store_analysis(job_role: str, candidate_name: str, job_title: str):
+    try:
+        data_handle = RecruitmentDataHandler(os.getenv("MONGODB_URI"))
+        
+        result = data_handle.store_analysis(
+            job_role=job_role,
+            candidate_name=candidate_name,
+            job_title=job_title
+        )
+        
+        if result["status"] in ["failed", "error"]:
+            raise HTTPException(
+                status_code=400 if result["status"] == "failed" else 500,
+                detail=result["message"]
+            )
+            
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error storing analysis: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to store analysis: {str(e)}"
+        )
 if __name__ == "__main__":
-    main()
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

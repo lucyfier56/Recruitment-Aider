@@ -26,32 +26,41 @@ class GitHubLinkAnalyzer:
         self.client = Groq(api_key=os.getenv('GROQ_API_KEY'))
     
     def extract_links_from_pdf(self, pdf_path: str) -> List[str]:
-        
-        with suppress(Exception):
+        try:
+            logger.debug(f"Opening PDF file: {pdf_path}")
             with fitz.open(pdf_path) as doc:
-                return list(dict.fromkeys([
-                    link['uri']
-                    for page_num in range(len(doc))
-                    for link in doc.load_page(page_num).get_links()
-                    if link.get('uri')
-                ]))
-        
-        return []
+                all_links = []
+                for page_num in range(len(doc)):
+                    page = doc.load_page(page_num)
+                    links = page.get_links()
+                    logger.debug(f"Page {page_num}: Found {len(links)} links")
+                    for link in links:
+                        if 'uri' in link:
+                            all_links.append(link['uri'])
+                
+                unique_links = list(dict.fromkeys(all_links))
+                logger.debug(f"Total unique links found: {len(unique_links)}")
+                return unique_links
+        except Exception as e:
+            logger.error(f"Error extracting links from PDF: {str(e)}")
+            return []
     
-    def filter_github_links(self, links: List[str]) -> bool:
-        
+    def filter_github_links(self, links: List[str]) -> List[str]:
         github_pattern = r'^https?://(?:www\.)?github\.com/[a-zA-Z0-9-]+/[a-zA-Z0-9-]+(?:/)?$'
         
-        with suppress(Exception):
+        try:
+            logger.debug(f"Filtering {len(links)} links")
             github_links = [
                 link for link in links 
                 if re.match(github_pattern, link) and 
                 not link.endswith('/blob/') and 
                 not link.endswith('/tree/')
             ]
-            return github_links if github_links else False
-        
-        return False
+            logger.debug(f"Found {len(github_links)} GitHub links: {github_links}")
+            return github_links
+        except Exception as e:
+            logger.error(f"Error filtering GitHub links: {str(e)}")
+            return []
     
     def fetch_readme(self, github_link: str) -> Optional[str]:
         
@@ -77,8 +86,9 @@ class GitHubLinkAnalyzer:
     
     
 
-    def analyze_readme(self, readme_content: str, github_link: str, jd_text: str) -> str:
-        
+    def analyze_readme(self, github_link: str, jd_text: str) -> str:
+        readme_content = self.fetch_readme(github_link)
+            
         if not readme_content:
             return "No README content available for analysis."
         

@@ -121,23 +121,33 @@ class LLMAnalyzer:
 
     from contextlib import suppress
 
-    def analyze_resume_and_jd(self, resume_text: str, jd_text: str, resume_pdf: str) -> tuple:
+    def analyze_resume_and_jd(self, resume_text: str, jd_text: str) -> dict:
         try:
             # Initialize with default values
-            candidate_name = self.extract_candidate_name(resume_text)
-            job_title = self.job_title(jd_text)
+            # candidate_name = self.extract_candidate_name(resume_text)
+            # job_title = self.job_title(jd_text)
             
-            # Get GitHub analysis
-            github_analyser = GitHubLinkAnalyzer()
-            github_analysis = github_analyser.process_github_projects(resume_pdf, jd_text)
-            
-            # Get embeddings
-            generate_embeddings = DocumentParser()
-            embeddings = generate_embeddings.get_embeddings(jd_text)
+            # # Get GitHub analysis
+            # github_analyser = GitHubLinkAnalyzer()
+            # try:
+            #     github_analysis = github_analyser.process_github_projects(resume_pdf, jd_text)
+            #     # If github_analysis is a boolean, convert it to a dict
+            #     if isinstance(github_analysis, bool):
+            #         github_analysis = {
+            #             "github_projects_found": github_analysis,
+            #             "details": "No GitHub projects analyzed"
+            #         }
+            # except Exception as e:
+            #     logger.error(f"Error in GitHub analysis: {e}")
+            #     github_analysis = {
+            #         "github_projects_found": False,
+            #         "error": str(e),
+            #         "details": "Failed to analyze GitHub projects"
+            #     }
             
             # Perform primary analysis
             try:
-                with open('prompt1.txt', 'r') as f:
+                with open('Aider/app/prompt1.txt', 'r') as f:
                     prompt_template = f.read()
 
                 primary_analysis = self.client.chat.completions.create(
@@ -165,26 +175,22 @@ class LLMAnalyzer:
                 logger.error(f"Error in primary analysis: {e}")
                 primary_analysis = f"Error performing analysis: {str(e)}"
 
-            job_data = {
-                "Job Title": job_title, 
-                "candidate_name": candidate_name,
+            # Return only the analysis results
+            return {
                 "analysis_text": primary_analysis,
-                "github_analysis": github_analysis,
-                "job_description": jd_text,
-                "resume": resume_text,
-                "embeddings": embeddings
+                # "github_analysis": github_analysis
             }
-            
-            return primary_analysis, job_data, github_analysis, embeddings
             
         except Exception as e:
             logger.error(f"Error in analyze_resume_and_jd: {e}")
-            return (
-                f"Error analyzing resume: {str(e)}", 
-                None,
-                None,
-                None
-            )
+            return {
+                "analysis_text": f"Error in analysis: {str(e)}",
+                "github_analysis": {
+                    "github_projects_found": False,
+                    "error": str(e),
+                    "details": "Analysis failed"
+                }
+            }
 
     
 
