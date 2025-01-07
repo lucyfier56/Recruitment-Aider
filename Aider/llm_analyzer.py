@@ -18,13 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMAnalyzer:
-    """
-    extract_candidate_name: Extracts the candidate's name from a resume
-    job_title: Extracts the job title from a job description
-    analyze_resume_and_jd: Analyzes a resume and job description
-    save_or_update_candidate_analysis: Saves or updates the candidate analysis in
-    a MongoDB database
-    """
+    
     
     def __init__(self, db=None):
         

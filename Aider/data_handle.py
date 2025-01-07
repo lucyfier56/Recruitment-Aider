@@ -21,6 +21,8 @@ class DataHandle:
             self.connection_string = connection_string or os.getenv("MONGODB_CONNECTION_STRING")
             if not self.connection_string:
                 raise ValueError("MongoDB connection string not provided")
+            
+            
             self.client = MongoClient(self.connection_string)
             self.db = self.client['recruitment_db']
             self.jobs_collection = self.db['jobs']
@@ -31,23 +33,32 @@ class DataHandle:
             print(f"MongoDB connection error: {e}")
             raise
 
-    def get_jobrole(self, role: str ) -> Optional[Dict[str, Any]]:
+    def verify_connection(self) -> bool:
+        try:
+            self.client.admin.command('ping')
+            return True
+        except Exception as e:
+            print(f"Connection verification failed: {e}")
+            return False
+
+    def get_jobrole(self, role: str) -> Optional[Dict[str, Any]]:
+        if not self.verify_connection():
+            print("Database connection is not active")
+            return None
         
         try:
             query = {"job_role": role}
-            result = self.jobrs_collection.find_one(query)
+            result = self.jobs_collection.find_one(query)
             
             if result:
                 return json.loads(json.dumps(result, cls=JsonEncoder))
+            return None
             
         except Exception as e:
             print(f"Error retrieving job role: {e}")
             return None
-    
     def get_all_job_titles(self) -> Optional[List[str]]:
-        """
-        Retrieve all job titles from the job_descriptions array
-        """
+        
         try:
             pipeline = [
                 {
@@ -68,9 +79,7 @@ class DataHandle:
             return None
 
     def get_job_titles_by_role(self, role: str) -> Optional[List[str]]:
-        """
-        Retrieve job titles filtered by job_role
-        """
+       
         try:
             pipeline = [
                 {

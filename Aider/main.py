@@ -26,7 +26,6 @@ from typing import Dict, Any, Optional
 
 class JsonEncoder(json.JSONEncoder):
     """
-    Custom JSON encoder to handle MongoDB specific data types
     """
     def default(self, obj):
         if isinstance(obj, ObjectId):
@@ -93,7 +92,6 @@ class ResumeUploadInput(BaseModel):
     job_role: str
     resume_content: str = Field(..., description="Resume content - can include multiple lines")
 
-# Set up proper logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -121,7 +119,6 @@ class JobRole(BaseModel):
     salary: str
     require_experience:str
     class Config:
-        # Allow population by field name for MongoDB _id
         allow_population_by_field_name = True
         json_encoders = {
             ObjectId: str
@@ -149,7 +146,6 @@ class ResumeResponse(BaseModel):
 
 
 
-# Add these new models to your existing BaseModel imports
 class JobTitlesResponse(BaseModel):
     status: str
     message: str
@@ -288,7 +284,6 @@ async def upload_jd_direct(job_input: DirectJDInput):
 
 async def parse_uploaded_file(file: UploadFile) -> str:
     try:
-        # Validate file types
         allowed_extensions = ['.pdf', '.docx', '.txt']
         
         if not file or not file.filename:
@@ -336,11 +331,10 @@ async def upload_resume(
     file: UploadFile = File(...)
 ):
     try:
-        # Read the PDF content
+       
         pdf_content = await file.read()
         file_obj = BytesIO(pdf_content)
         
-        # Extract text content
         content_text, error_msg = document_parser.extract_text_from_file(
             file=file_obj,
             filename=file.filename
@@ -645,9 +639,7 @@ def get_all_candidates(self) -> Optional[List[Dict[str, Any]]]:
         return None
 
 def get_candidate_by_name(self, candidate_name: str) -> Optional[Dict[str, Any]]:
-    """
-    Retrieve a specific candidate's details by name
-    """
+   
     try:
         pipeline = [
             {
@@ -678,9 +670,7 @@ def get_candidate_by_name(self, candidate_name: str) -> Optional[Dict[str, Any]]
         return None
 
 def get_candidates_by_job_role(self, job_role: str) -> Optional[List[Dict[str, Any]]]:
-    """
-    Retrieve all candidates for a specific job role
-    """
+   
     try:
         pipeline = [
             {
