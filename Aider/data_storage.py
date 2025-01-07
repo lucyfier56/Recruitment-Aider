@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class RecruitmentDataHandler:
+class RecruitmentDataStorage:
     def __init__(self, connection_string: str):
         try:
             self.client = MongoClient(connection_string)

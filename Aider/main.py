@@ -1,8 +1,9 @@
 import datetime
 from io import BytesIO
+import json
 import tempfile
 from fastapi import FastAPI, UploadFile, File, HTTPException,Form
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from fastapi.responses import JSONResponse
 import uvicorn
 from pydantic import BaseModel, Field
@@ -11,15 +12,30 @@ import logging
 from bson import ObjectId
 from document_parser import DocumentParser
 from llm_analyzer import LLMAnalyzer
-from data_storage import RecruitmentDataHandler
+from data_storage import RecruitmentDataStorage
 from dotenv import load_dotenv
 load_dotenv()
+from data_handle import DataHandle
 
 from logging import getLogger
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional
+
+
+class JsonEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder to handle MongoDB specific data types
+    """
+    def default(self, obj):
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        if isinstance(obj, datetime.datetime):
+            return obj.isoformat()
+        if isinstance(obj, bytes):
+            return obj.decode('utf-8')
+        return super().default(obj)
 
 class StoreAnalysisInput(BaseModel):
     job_role: str = Field(..., description="Job role to analyze against")
@@ -131,6 +147,42 @@ class ResumeResponse(BaseModel):
             datetime.datetime: lambda v: v.isoformat()
         }
 
+
+
+# Add these new models to your existing BaseModel imports
+class JobTitlesResponse(BaseModel):
+    status: str
+    message: str
+    titles: List[str]
+    total_titles: int
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class CandidateBase(BaseModel):
+    candidate_name: str
+    resume_content: str
+    uploaded_at: datetime.datetime
+    github_links: Optional[List[str]]
+    job_role: str
+
+class CandidateDetail(CandidateBase):
+    analysis: Optional[Dict[str, Any]]
+
+class CandidateResponse(BaseModel):
+    status: str
+    message: str
+    data: Optional[Union[List[CandidateBase], CandidateDetail]]
+    total_candidates: Optional[int]
+
+    class Config:
+        arbitrary_types_allowed = True
+        json_encoders = {
+            ObjectId: str,
+            datetime.datetime: lambda v: v.isoformat()
+        }
+
 document_parser = DocumentParser()
 
 
@@ -139,7 +191,7 @@ document_parser = DocumentParser()
 async def create_role(job : JobRole):
     try:
         connection_string = os.getenv("MONGODB_URI") 
-        data_handle = RecruitmentDataHandler(connection_string)
+        data_handle =RecruitmentDataStorage(connection_string)
         result = data_handle.add_jobrole(
             job_role = job.job_role,
             department = job.department,
@@ -190,7 +242,7 @@ async def upload_jd_file(
         # Initialize LLMAnalyzer and get job title
         llm_analyzer = LLMAnalyzer()
         title = llm_analyzer.job_title(content)
-        data_handle = RecruitmentDataHandler(os.getenv("MONGODB_URI"))
+        data_handle =RecruitmentDataStorage(os.getenv("MONGODB_URI"))
         
         result = data_handle.upload_jd(
             job_role=job_role,
@@ -213,7 +265,7 @@ async def upload_jd_file(
 @app.post("/jobs/upload-jd/direct", response_model=JDResponse)
 async def upload_jd_direct(job_input: DirectJDInput):
     try:
-        data_handle = RecruitmentDataHandler(os.getenv("MONGODB_URI"))
+        data_handle =RecruitmentDataStorage(os.getenv("MONGODB_URI"))
         
         
         result = data_handle.upload_jd(
@@ -300,7 +352,7 @@ async def upload_resume(
         if not content_text:
             raise HTTPException(status_code=400, detail="No content could be extracted from the file")
         
-        data_handle = RecruitmentDataHandler(os.getenv("MONGODB_URI"))
+        data_handle =RecruitmentDataStorage(os.getenv("MONGODB_URI"))
         upload_result = data_handle.upload_resume(
             job_role=job_role,
             job_title=job_title,
@@ -328,7 +380,7 @@ async def upload_resume(
 @app.post("/analysis/store", response_model=StoreAnalysisResponse)
 async def store_analysis(job_role: str, candidate_name: str, job_title: str):
     try:
-        data_handle = RecruitmentDataHandler(os.getenv("MONGODB_URI"))
+        data_handle =RecruitmentDataStorage(os.getenv("MONGODB_URI"))
         
         result = data_handle.store_analysis(
             job_role=job_role,
@@ -355,5 +407,308 @@ async def store_analysis(job_role: str, candidate_name: str, job_title: str):
             status_code=500,
             detail=f"Failed to store analysis: {str(e)}"
         )
+
+@app.get("/jobs/{job_role}", response_model=JobResponse)
+async def get_jobrole(job_role: str):
+    try:
+        
+        data_handle = DataHandle(os.getenv("MONGODB_CONNECTION_STRING"))
+        result = data_handle.get_jobrole(job_role)
+        
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail="Job role not found"
+            )
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail = f"Failed to retrieve job role: {str(e)}"
+        )
+
+@app.get("/jobs/titles/all", response_model=JobTitlesResponse)
+async def get_all_titles():
+    try:
+        data_handle = DataHandle(os.getenv("MONGODB_CONNECTION_STRING"))
+        titles = data_handle.get_all_job_titles()
+        
+        if titles is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to retrieve job titles"
+            )
+            
+        result = {
+            "status": "success",
+            "message": "Job titles retrieved successfully",
+            "titles": titles,
+            "total_titles": len(titles)
+        }
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+        
+    except Exception as e:
+        logger.error(f"Error retrieving job titles: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve job titles: {str(e)}"
+        )
+    finally:
+        data_handle.close_connection()
+
+@app.get("/jobs/titles/{role}", response_model=JobTitlesResponse)
+async def get_titles_by_role(role: str):
+    try:
+        data_handle = DataHandle(os.getenv("MONGODB_CONNECTION_STRING"))
+        titles = data_handle.get_job_titles_by_role(role)
+        
+        if titles is None:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to retrieve job titles for role: {role}"
+            )
+            
+        if not titles:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No job titles found for role: {role}"
+            )
+            
+        result = {
+            "status": "success",
+            "message": f"Job titles for role '{role}' retrieved successfully",
+            "titles": titles,
+            "total_titles": len(titles)
+        }
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving job titles for role {role}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve job titles: {str(e)}"
+        )
+    finally:
+        data_handle.close_connection()
+        
+        
+@app.get("/candidates/all", response_model=CandidateResponse)
+async def get_all_candidates():
+    try:
+        data_handle = DataHandle(os.getenv("MONGODB_CONNECTION_STRING"))
+        candidates = data_handle.get_all_candidates()
+        
+        if candidates is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to retrieve candidates"
+            )
+            
+        result = {
+            "status": "success",
+            "message": "Candidates retrieved successfully",
+            "data": candidates,
+            "total_candidates": len(candidates)
+        }
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+        
+    except Exception as e:
+        logger.error(f"Error retrieving candidates: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve candidates: {str(e)}"
+        )
+    finally:
+        data_handle.close_connection()
+
+@app.get("/candidates/{candidate_name}", response_model=CandidateResponse)
+async def get_candidate_by_name(candidate_name: str):
+    try:
+        data_handle = DataHandle(os.getenv("MONGODB_CONNECTION_STRING"))
+        candidate = data_handle.get_candidate_by_name(candidate_name)
+        
+        if not candidate:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Candidate not found: {candidate_name}"
+            )
+            
+        result = {
+            "status": "success",
+            "message": f"Candidate {candidate_name} retrieved successfully",
+            "data": candidate,
+            "total_candidates": 1
+        }
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving candidate {candidate_name}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve candidate: {str(e)}"
+        )
+    finally:
+        data_handle.close_connection()
+
+@app.get("/candidates/role/{job_role}", response_model=CandidateResponse)
+async def get_candidates_by_role(job_role: str):
+    try:
+        data_handle = DataHandle(os.getenv("MONGODB_CONNECTION_STRING"))
+        candidates = data_handle.get_candidates_by_job_role(job_role)
+        
+        if candidates is None:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to retrieve candidates for role: {job_role}"
+            )
+            
+        if not candidates:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No candidates found for role: {job_role}"
+            )
+            
+        result = {
+            "status": "success",
+            "message": f"Candidates for role '{job_role}' retrieved successfully",
+            "data": candidates,
+            "total_candidates": len(candidates)
+        }
+        
+        return JSONResponse(
+            status_code=200,
+            content=result
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving candidates for role {job_role}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve candidates: {str(e)}"
+        )
+    finally:
+        data_handle.close_connection()
+        
+
+def get_all_candidates(self) -> Optional[List[Dict[str, Any]]]:
+    """
+    Retrieve all candidates from the database
+    """
+    try:
+        pipeline = [
+            {
+                "$unwind": "$candidates"
+            },
+            {
+                "$project": {
+                    "candidate_name": "$candidates.candidate_name",
+                    "resume_content": "$candidates.resume_content",
+                    "uploaded_at": "$candidates.uploaded_at",
+                    "github_links": "$candidates.github_links",
+                    "job_role": "$job_role"
+                }
+            }
+        ]
+        
+        results = list(self.jobs_collection.aggregate(pipeline))
+        return json.loads(json.dumps(results, cls=JsonEncoder)) if results else []
+            
+    except Exception as e:
+        print(f"Error retrieving candidates: {e}")
+        return None
+
+def get_candidate_by_name(self, candidate_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve a specific candidate's details by name
+    """
+    try:
+        pipeline = [
+            {
+                "$unwind": "$candidates"
+            },
+            {
+                "$match": {
+                    "candidates.candidate_name": candidate_name
+                }
+            },
+            {
+                "$project": {
+                    "candidate_name": "$candidates.candidate_name",
+                    "resume_content": "$candidates.resume_content",
+                    "uploaded_at": "$candidates.uploaded_at",
+                    "github_links": "$candidates.github_links",
+                    "analysis": "$candidates.analysis",
+                    "job_role": "$job_role"
+                }
+            }
+        ]
+        
+        result = list(self.jobs_collection.aggregate(pipeline))
+        return json.loads(json.dumps(result[0], cls=JsonEncoder)) if result else None
+            
+    except Exception as e:
+        print(f"Error retrieving candidate {candidate_name}: {e}")
+        return None
+
+def get_candidates_by_job_role(self, job_role: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Retrieve all candidates for a specific job role
+    """
+    try:
+        pipeline = [
+            {
+                "$match": {
+                    "job_role": job_role
+                }
+            },
+            {
+                "$unwind": "$candidates"
+            },
+            {
+                "$project": {
+                    "candidate_name": "$candidates.candidate_name",
+                    "resume_content": "$candidates.resume_content",
+                    "uploaded_at": "$candidates.uploaded_at",
+                    "github_links": "$candidates.github_links",
+                    "analysis": "$candidates.analysis"
+                }
+            }
+        ]
+        
+        results = list(self.jobs_collection.aggregate(pipeline))
+        return json.loads(json.dumps(results, cls=JsonEncoder)) if results else []
+            
+    except Exception as e:
+        print(f"Error retrieving candidates for role {job_role}: {e}")
+        return None
+
+        
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
