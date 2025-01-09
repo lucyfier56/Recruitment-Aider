@@ -19,6 +19,7 @@ class RecruitmentDataStorage:
     def __init__(self, connection_string: str):
         try:
             self.client = MongoClient(connection_string)
+            print("We are here!")
             self.db = self.client['recruitment_db']
             self.jobs_collection = self.db['jobs']
             # Test connection
@@ -224,7 +225,7 @@ class RecruitmentDataStorage:
                 "uploaded_at": datetime.datetime.utcnow()
             }
 
-            # Find the index of the matching job description
+           
             jd_index = next(
                 (i for i, jd in enumerate(job["job_descriptions"]) 
                 if jd.get("title", "").lower() == job_title.lower()),
@@ -306,7 +307,6 @@ class RecruitmentDataStorage:
                 logger.error(f"Job not found for role: {job_role}")
                 return {"status": "failed", "message": "Job role not found"}
             
-            # Find matching job description by title
             matching_jd = None
             jd_index = None
             for idx, jd in enumerate(job.get("job_descriptions", [])):
@@ -324,7 +324,6 @@ class RecruitmentDataStorage:
                 logger.error("Job description text is empty")
                 return {"status": "failed", "message": "Job description text is empty"}
                 
-            # Find candidate
             candidate = next(
                 (c for c in matching_jd.get("candidates", []) 
                 if c["candidate_name"].lower() == candidate_name.lower()),
@@ -335,17 +334,14 @@ class RecruitmentDataStorage:
                 logger.error(f"Candidate not found: {candidate_name}")
                 return {"status": "failed", "message": "Candidate not found"}
 
-            # Analyze resume and job description
             analyzer = LLMAnalyzer()
             analysis_result = analyzer.analyze_resume_and_jd(
                 jd_text=jd_text,
                 resume_text=candidate["resume_content"]
             )
 
-            # Initialize GitHub analyzer
             github_analyzer = GitHubLinkAnalyzer()
             
-            # Structure the analysis data with candidate analysis
             analysis = {
                 "analyses": [
                     {
@@ -356,17 +352,14 @@ class RecruitmentDataStorage:
                 "github_links": candidate.get("github_links", [])
             }
 
-            # Analyze GitHub repositories if links are available
             github_links = candidate.get("github_links", [])
             if github_links:
                 try:
-                    # Process each GitHub link individually
                     all_github_analyses = []
                     for link in github_links:
                         try:
-                            # Analyze single repository with correct parameters
                             repo_analysis = github_analyzer.analyze_readme(
-                                github_link=link,  # Pass as named parameter
+                                github_link=link, 
                                 jd_text=jd_text
                             )
                             if repo_analysis:
@@ -390,7 +383,6 @@ class RecruitmentDataStorage:
                         "content": error_msg
                     })
 
-            # Update the database with the complete analysis structure
             update_query = {"_id": job["_id"]}
             update_operation = {
                 "$set": {
@@ -411,7 +403,6 @@ class RecruitmentDataStorage:
                 logger.error("Failed to update analysis in database")
                 return {"status": "error", "message": "Failed to store analysis in database"}
 
-            # Fetch and return the updated document
             updated_job = self.jobs_collection.find_one({"_id": job["_id"]})
             return {
                 "status": "success",

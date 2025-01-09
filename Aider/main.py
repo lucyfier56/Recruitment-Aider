@@ -186,7 +186,7 @@ document_parser = DocumentParser()
 @app.post("/jobs/", response_model=JobResponse)
 async def create_role(job : JobRole):
     try:
-        connection_string = os.getenv("MONGODB_URI") 
+        connection_string = os.getenv("MONGODB_CONNECTION_STRING") 
         data_handle =RecruitmentDataStorage(connection_string)
         result = data_handle.add_jobrole(
             job_role = job.job_role,
@@ -346,7 +346,7 @@ async def upload_resume(
         if not content_text:
             raise HTTPException(status_code=400, detail="No content could be extracted from the file")
         
-        data_handle =RecruitmentDataStorage(os.getenv("MONGODB_URI"))
+        data_handle =RecruitmentDataStorage(os.getenv("MONGODB_CONNECTION_STRING"))
         upload_result = data_handle.upload_resume(
             job_role=job_role,
             job_title=job_title,
@@ -374,7 +374,7 @@ async def upload_resume(
 @app.post("/analysis/store", response_model=StoreAnalysisResponse)
 async def store_analysis(job_role: str, candidate_name: str, job_title: str):
     try:
-        data_handle =RecruitmentDataStorage(os.getenv("MONGODB_URI"))
+        data_handle =RecruitmentDataStorage(os.getenv("MONGODB_CONNECTION_STRING"))
         
         result = data_handle.store_analysis(
             job_role=job_role,

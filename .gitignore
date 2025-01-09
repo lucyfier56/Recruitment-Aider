@@ -21,3 +21,5 @@ eraser-export-export-12-11-2024-3_51_49-PM.zip
 Aider/uploaded_documents
 Aider/VectoreStoreManager.py
 frontend/package.json
+streamlit/__pycache__
+streamlit/.env

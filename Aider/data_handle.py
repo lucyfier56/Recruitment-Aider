@@ -26,7 +26,7 @@ class DataHandle:
             self.client = MongoClient(self.connection_string)
             self.db = self.client['recruitment_db']
             self.jobs_collection = self.db['jobs']
-            # Test connection
+         
             self.client.admin.command('ping')
             print("Connected to MongoDB successfully!")
         except Exception as e:
