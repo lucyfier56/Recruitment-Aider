@@ -17,16 +17,37 @@ logger = logging.getLogger(__name__)
 
 class RecruitmentDataStorage:
     def __init__(self, connection_string: str):
+        if not connection_string:
+            raise ValueError("MongoDB connection string is empty or None")
+            
         try:
-            self.client = MongoClient(connection_string)
+            # Add timeout to avoid hanging
+            self.client = MongoClient(connection_string, serverSelectionTimeoutMS=5000)
+            
+            # Test connection with timeout
+            self.client.admin.command('ping')
+            
             self.db = self.client['recruitment_db']
             self.jobs_collection = self.db['jobs']
-            # Test connection
-            self.client.admin.command('ping')
-            print("Connected to MongoDB successfully!")
+            
+            # Verify we can access the collection
+            self.jobs_collection.find_one({})
+            
+            print("Successfully connected to MongoDB and verified database access")
+            
         except Exception as e:
-            print(f"MongoDB connection error: {e}")
-            raise
+            detailed_error = f"MongoDB connection error: {str(e)}"
+            print(detailed_error)
+            
+            # Add specific error handling for common issues
+            if "bad auth" in str(e).lower():
+                print("Authentication failed. Please verify your username and password.")
+            elif "invalid username" in str(e).lower():
+                print("Invalid username. Please check your credentials.")
+            elif "connection timed out" in str(e).lower():
+                print("Connection timed out. Please check your network and cluster URL.")
+            
+            raise ConnectionError(detailed_error)
 
     def _convert_numpy_to_list(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Convert NumPy arrays to lists in the dictionary"""
