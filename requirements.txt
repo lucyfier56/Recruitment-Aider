@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+python-multipart
+pymongo
+python-dotenv
+numpy
+scipy
+sentence-transformers
+PyPDF2
+python-docx
+groq
+requests
+PyMuPDF
+pydantic
+typing-extensions
